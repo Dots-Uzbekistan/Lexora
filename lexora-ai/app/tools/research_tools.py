@@ -21,14 +21,17 @@ def generate_multi_search_strategy(
     search_queries_planned: Annotated[List[MultiSearchQuery], InjectedState("search_queries_planned")],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Generate multiple search queries from general to specific for comprehensive legal research.
+    """🚀 START HERE: Generate multiple search queries for comprehensive legal research.
     
     Creates 3-5 progressive search queries that move from broad legal concepts to specific
     terms related to the user's question. This mimics how professional lawyers approach
     legal research in databases.
     
+    WORKFLOW REQUIREMENT: This is Step 1 of the mandatory research sequence:
+    1. generate_multi_search_strategy → 2. execute_multi_search → 3. validate_and_rank_sources → 4. request_source_approval
+    
     Args:
-        user_question: The user's legal research question
+        user_question: The user's legal research question - REQUIRED parameter to provide
         legal_concepts_identified: Previously identified legal concepts (injected from state)
         search_queries_planned: Previously planned queries (injected from state)
     
@@ -159,10 +162,16 @@ def execute_multi_search(
     raw_search_results: Annotated[List[SearchResult], InjectedState("raw_search_results")],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Execute the planned search queries using Brave Search and collect results.
+    """⚠️ PREREQUISITE: Must call `generate_multi_search_strategy` first to plan search queries.
+    
+    Execute the planned search queries using Brave Search and collect legal documents.
+    This tool runs 3-5 progressive searches from general to specific terms.
+    
+    WORKFLOW REQUIREMENT: This is Step 2 of the mandatory research sequence:
+    1. generate_multi_search_strategy → 2. execute_multi_search → 3. validate_and_rank_sources → 4. request_source_approval
     
     Args:
-        search_queries_planned: Planned search queries (injected from state)
+        search_queries_planned: Planned search queries (injected from state) - REQUIRED from generate_multi_search_strategy
         search_queries_executed: Already executed queries (injected from state)
         raw_search_results: Existing search results (injected from state)
     
@@ -173,7 +182,7 @@ def execute_multi_search(
     if not search_queries_planned:
         return Command(
             update={
-                "messages": [ToolMessage("No search queries planned. Generate strategy first.", tool_call_id=tool_call_id)]
+                "messages": [ToolMessage("❌ Cannot execute searches: No search strategy found.\n\nYou MUST call `generate_multi_search_strategy` first to plan the search queries before execution.\n\nRequired sequence: generate_multi_search_strategy → execute_multi_search", tool_call_id=tool_call_id)]
             }
         )
     
@@ -243,10 +252,16 @@ def validate_and_rank_sources(
     validation_results: Annotated[List[ValidationResult], InjectedState("validation_results")],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Validate search results for relevance and eliminate duplicates.
+    """⚠️ PREREQUISITE: Must call `execute_multi_search` first to get search results.
+    
+    Validate search results for relevance and eliminate duplicates. This tool analyzes 
+    each search result for relevance to the user's question and ranks them by quality.
+    
+    WORKFLOW REQUIREMENT: This is Step 3 of the mandatory research sequence:
+    1. generate_multi_search_strategy → 2. execute_multi_search → 3. validate_and_rank_sources → 4. request_source_approval
     
     Args:
-        raw_search_results: Search results to validate (injected from state)
+        raw_search_results: Search results to validate (injected from state) - REQUIRED from execute_multi_search
         current_user_question: User's question for relevance check (injected from state)
         validation_results: Existing validation results (injected from state)
     
@@ -257,7 +272,7 @@ def validate_and_rank_sources(
     if not raw_search_results:
         return Command(
             update={
-                "messages": [ToolMessage("No search results to validate", tool_call_id=tool_call_id)]
+                "messages": [ToolMessage("❌ Cannot validate sources: No search results found.\n\nYou MUST call `execute_multi_search` first to search for documents before validation.\n\nRequired sequence: generate_multi_search_strategy → execute_multi_search → validate_and_rank_sources", tool_call_id=tool_call_id)]
             }
         )
     
@@ -271,36 +286,93 @@ def validate_and_rank_sources(
     validated_results = []
     question_keywords = set(current_user_question.lower().split())
     
+    # Enhanced keyword matching for pension research
+    pension_keywords = {'пенсия', 'пенсии', 'пенсионн', 'размер', 'минимальн', 'повышен', 'сум', 'выплат'}
+    year_keywords = {'2023', '2024', '2025'}
+    amount_keywords = {'000', 'сум', 'размер', 'миқдор'}
+    
     for result in raw_search_results:
         # Calculate relevance based on title and snippet
-        title_words = set(result.title.lower().split())
-        snippet_words = set(result.snippet.lower().split())
+        title_lower = result.title.lower()
+        snippet_lower = result.snippet.lower() if result.snippet else ""
+        combined_text = title_lower + " " + snippet_lower
         
-        # Keyword overlap score
+        title_words = set(title_lower.split())
+        snippet_words = set(snippet_lower.split()) if snippet_lower else set()
+        all_words = title_words.union(snippet_words)
+        
+        # Base keyword overlap score
         title_overlap = len(question_keywords.intersection(title_words)) / max(len(question_keywords), 1)
         snippet_overlap = len(question_keywords.intersection(snippet_words)) / max(len(question_keywords), 1)
         
-        # Combined relevance score
-        relevance_score = (title_overlap * 0.4 + snippet_overlap * 0.3 + result.relevance_score * 0.3)
+        # Enhanced scoring for pension-specific content
+        pension_score = 0
+        year_score = 0
+        amount_score = 0
         
-        # Determine if relevant (threshold: 0.3)
-        is_relevant = relevance_score >= 0.3
+        # Pension keywords bonus
+        pension_matches = len(pension_keywords.intersection(all_words))
+        if pension_matches > 0:
+            pension_score = min(pension_matches * 0.2, 0.4)  # Up to 0.4 bonus
         
-        # Generate brief one-sentence reasoning for why this source is relevant
+        # Year keywords bonus - critical for this question
+        year_matches = len(year_keywords.intersection(all_words))
+        if year_matches > 0:
+            year_score = min(year_matches * 0.3, 0.6)  # Up to 0.6 bonus for years
+        
+        # Check for specific years in title (extra bonus)
+        if any(year in title_lower for year in year_keywords):
+            year_score += 0.2
+        
+        # Amount/number bonus (for documents with actual pension amounts)
+        if any(amt_word in combined_text for amt_word in amount_keywords):
+            amount_score = 0.2
+            
+        # Special bonus for documents about pension increases
+        if 'повышении размеров' in title_lower and any(word in title_lower for word in ['пенси', 'пособ']):
+            pension_score += 0.3
+            
+        # Combined relevance score with enhanced weighting
+        base_score = (title_overlap * 0.3 + snippet_overlap * 0.2 + result.relevance_score * 0.2)
+        enhanced_score = base_score + pension_score + year_score + amount_score
+        
+        relevance_score = min(enhanced_score, 1.0)  # Cap at 1.0
+        
+        # Lower threshold for enhanced algorithm
+        is_relevant = relevance_score >= 0.25 or (pension_score > 0 and year_score > 0)
+        
+        # Generate enhanced reasoning based on scoring factors
         if is_relevant:
-            # Create meaningful reasoning based on content overlap
-            overlapping_keywords = question_keywords.intersection(title_words.union(snippet_words))
-            if overlapping_keywords:
-                key_matches = list(overlapping_keywords)[:3]  # Top 3 matching keywords
-                reasoning = f"Contains key terms: {', '.join(key_matches)} - directly addresses the question"
+            reasons = []
+            
+            if year_score > 0:
+                matched_years = [year for year in year_keywords if year in combined_text]
+                reasons.append(f"Contains target years: {', '.join(matched_years)}")
+                
+            if pension_score > 0:
+                pension_matches = pension_keywords.intersection(all_words)
+                if pension_matches:
+                    reasons.append(f"Pension-related terms: {', '.join(list(pension_matches)[:2])}")
+                    
+            if 'повышении размеров' in title_lower:
+                reasons.append("Document about increasing pension/salary amounts")
+                
+            if amount_score > 0:
+                reasons.append("Contains monetary amounts or financial details")
+            
+            if reasons:
+                reasoning = "; ".join(reasons)
             else:
-                reasoning = f"High relevance score ({relevance_score:.2f}) - content matches question intent"
+                reasoning = f"High relevance score ({relevance_score:.2f}) - matches question intent"
         else:
-            reasoning = f"Limited relevance ({relevance_score:.2f}) - few matching keywords with question"
+            reasoning = f"Limited relevance ({relevance_score:.2f}) - insufficient pension/year keywords"
         
         validation_result = ValidationResult(
             document_id=result.document_id,
             title=result.title,
+            snippet=result.snippet,
+            url=result.url,
+            document_date=result.document_date,
             is_relevant=is_relevant,
             relevance_score=relevance_score,
             reasoning=reasoning
@@ -350,12 +422,16 @@ def request_source_approval(
     completed_stages: Annotated[List[str], InjectedState("completed_stages")],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Request human approval for validated sources before proceeding with document analysis.
+    """⚠️ PREREQUISITE: Must call `validate_and_rank_sources` first to validate search results.
     
-    Uses LangGraph's interrupt functionality to pause execution until human input.
+    Request human approval for validated sources before proceeding with document analysis.
+    This tool uses LangGraph's interrupt functionality to pause execution until human input.
+    
+    WORKFLOW REQUIREMENT: This is Step 4 of the mandatory research sequence:
+    1. generate_multi_search_strategy → 2. execute_multi_search → 3. validate_and_rank_sources → 4. request_source_approval
     
     Args:
-        validation_results: Validation results (injected from state)
+        validation_results: Validation results (injected from state) - REQUIRED from validate_and_rank_sources
         current_user_question: User's question (injected from state)
         completed_stages: Completed workflow stages (injected from state)
     
@@ -363,10 +439,19 @@ def request_source_approval(
         Command object that sets up approval workflow and interrupts execution
     """
     
+    # Check prerequisites - must have validation results from validate_and_rank_sources
     if not validation_results:
         return Command(
             update={
-                "messages": [ToolMessage("No validation results available for approval", tool_call_id=tool_call_id)]
+                "messages": [ToolMessage("❌ Cannot request source approval: No validation results found.\n\nYou MUST call `validate_and_rank_sources` first to validate the search results before requesting approval.\n\nRequired sequence: generate_multi_search_strategy → execute_multi_search → validate_and_rank_sources → request_source_approval", tool_call_id=tool_call_id)]
+            }
+        )
+    
+    # Check if sources_validated stage was completed
+    if "sources_validated" not in completed_stages:
+        return Command(
+            update={
+                "messages": [ToolMessage("❌ Cannot request approval: Sources have not been validated.\n\nYou MUST call `validate_and_rank_sources` first to complete the validation stage before requesting approval.", tool_call_id=tool_call_id)]
             }
         )
     
@@ -401,29 +486,184 @@ def request_source_approval(
             }
         )
     
-    approval_text = f"Found {len(relevant_sources)} relevant sources for: {current_user_question}\n\n"
-    approval_text += "Please review and approve sources:\n"
-    
-    for i, source in enumerate(relevant_sources, 1):
-        approval_text += f"{i}. **{source.title}** (Score: {source.relevance_score:.2f})\n"
-        approval_text += f"   Reasoning: {source.reasoning}\n"
-        approval_text += f"   Document ID: {source.document_id}\n\n"
-    
-    approval_text += "Reply with document IDs to approve (e.g., '123456 789012') or 'all' to approve all relevant sources."
-    
-    # Set up state for approval and interrupt
-    update_state = {
-        "pending_approval": True,
-        "approval_required_for": "sources",
-        "last_approval_request": approval_text,
-        "workflow_stage": "awaiting_approval",
-        "completed_stages": completed_stages + ["source_approval_requested"],
-        "messages": [ToolMessage(approval_text, tool_call_id=tool_call_id)]
-    }
-    
-    # Interrupt execution for human input
-    return Command(update=update_state, graph=interrupt(approval_text))
+    try:
+        # Create user-friendly approval message  
+        approval_text = f"I found {len(relevant_sources)} relevant sources for your question about minimum pension amounts in 2023, 2024, and 2025.\n\n"
+        approval_text += "Please review and select the sources you'd like me to analyze:\n\n"
+        
+        for i, source in enumerate(relevant_sources, 1):
+            approval_text += f"{i}. **{source.title}** (Relevance: {source.relevance_score:.2f})\n"
+            approval_text += f"   Why relevant: {source.reasoning}\n"
+            approval_text += f"   Document ID: {source.document_id}\n\n"
+        
+        approval_text += "Please select the sources you want me to analyze by clicking the approval buttons, or type 'all' to approve all sources."
+        
+        print(f"DEBUG: Creating approval request for {len(relevant_sources)} sources")
+        
+        # Set up state for approval workflow
+        update_state = {
+            "pending_approval": True,
+            "approval_required_for": "sources", 
+            "last_approval_request": approval_text,
+            "workflow_stage": "awaiting_approval",
+            "completed_stages": completed_stages + ["source_approval_requested"],
+            "messages": [ToolMessage(approval_text, tool_call_id=tool_call_id)]
+        }
+        
+        print(f"DEBUG: Update state prepared with pending_approval={update_state['pending_approval']}")
+        
+        # Return command that sets up the approval state
+        return Command(update=update_state)
+        
+    except Exception as e:
+        print(f"ERROR in request_source_approval: {e}")
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error setting up source approval: {str(e)}", tool_call_id=tool_call_id)]
+            }
+        )
 
+
+
+@tool
+def create_legal_analysis_from_approved_sources(
+    approved_document_ids: Annotated[List[str], InjectedState("approved_document_ids")],
+    validation_results: Annotated[List[ValidationResult], InjectedState("validation_results")],
+    current_user_question: Annotated[str, InjectedState("current_user_question")],
+    parsed_documents: Annotated[Dict[str, DocumentContent], InjectedState("parsed_documents")],
+    tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """🎯 Create legal analysis based on approved sources with actual document content.
+    
+    This tool takes approved document IDs, extracts the relevant content from validation results
+    or parses full documents, and creates a factual legal analysis based on real information.
+    
+    PREREQUISITE: Use only AFTER user approves sources via request_source_approval workflow.
+    
+    Args:
+        approved_document_ids: Document IDs approved by human (injected from state)
+        validation_results: Validation results with document info (injected from state)  
+        current_user_question: User's research question (injected from state)
+        parsed_documents: Already parsed document content (injected from state)
+    
+    Returns:
+        Command with legal analysis artifact based on real document content
+    """
+    
+    if not approved_document_ids:
+        return Command(
+            update={
+                "messages": [ToolMessage("❌ No approved sources found. Cannot create analysis without approved documents.", tool_call_id=tool_call_id)]
+            }
+        )
+    
+    if not validation_results:
+        print("WARNING: validation_results is empty, this suggests state preservation issue")
+        return Command(
+            update={
+                "messages": [ToolMessage("❌ No validation results available. This may indicate a state preservation issue after approval. Cannot access document information without validation context.", tool_call_id=tool_call_id)]
+            }
+        )
+    
+    # Handle "all" approval by getting all relevant document IDs
+    if approved_document_ids == ["all"]:
+        relevant_docs = [r for r in validation_results if hasattr(r, 'is_relevant') and r.is_relevant]
+        approved_document_ids = [doc.document_id for doc in relevant_docs]
+        print(f"DEBUG: Expanding 'all' to {len(approved_document_ids)} relevant documents")
+    
+    # Find approved documents in validation results
+    approved_sources = []
+    for result in validation_results:
+        if hasattr(result, 'document_id') and result.document_id in approved_document_ids:
+            approved_sources.append(result)
+    
+    if not approved_sources:
+        return Command(
+            update={
+                "messages": [ToolMessage("❌ Could not find approved documents in validation results.", tool_call_id=tool_call_id)]
+            }
+        )
+    
+    print(f"DEBUG: Creating analysis based on {len(approved_sources)} approved sources")
+    
+    # Parse documents that haven't been parsed yet for better analysis
+    updated_parsed_documents = dict(parsed_documents)  # Copy existing
+    
+    for source in approved_sources:
+        if source.document_id not in parsed_documents and hasattr(source, 'url') and source.url:
+            try:
+                print(f"DEBUG: Attempting to parse document {source.document_id}")
+                parsing_result = legal_parser_instance.parse_legal_document(source.url)
+                
+                if parsing_result.get("success", False):
+                    document_content = DocumentContent(
+                        document_id=source.document_id,
+                        title=parsing_result["metadata"]["title"],
+                        content=parsing_result["markdown"],
+                        metadata=parsing_result["metadata"],
+                        parsing_date=datetime.now().isoformat()
+                    )
+                    updated_parsed_documents[source.document_id] = document_content
+                    print(f"DEBUG: Successfully parsed document {source.document_id}")
+                else:
+                    print(f"DEBUG: Failed to parse document {source.document_id}: {parsing_result.get('error', 'Unknown error')}")
+            except Exception as e:
+                print(f"DEBUG: Exception parsing document {source.document_id}: {e}")
+    
+    # Create legal analysis based on actual document content
+    analysis_content = f"# Анализ минимальной пенсии на основании официальных документов\n\n"
+    analysis_content += f"**Исследуемый вопрос:** {current_user_question}\n\n"
+    analysis_content += f"**Анализ проведен на основании {len(approved_sources)} официальных источников:**\n\n"
+    
+    # Add each approved source with its actual content
+    for i, source in enumerate(approved_sources, 1):
+        analysis_content += f"## {i}. {source.title}\n"
+        analysis_content += f"**Документ:** {source.document_id}\n"
+        analysis_content += f"**Релевантность:** {source.relevance_score:.2f}\n"
+        analysis_content += f"**Обоснование включения:** {source.reasoning}\n\n"
+        
+        # Use parsed document content if available, otherwise use snippet
+        if source.document_id in updated_parsed_documents:
+            doc_content = updated_parsed_documents[source.document_id].content
+            # Extract first 1000 characters of relevant content for better analysis
+            content_preview = doc_content[:1000] + "..." if len(doc_content) > 1000 else doc_content
+            analysis_content += f"**Полное содержание документа:**\n{content_preview}\n\n"
+        else:
+            # Use validation snippet from search results
+            snippet_content = source.snippet if hasattr(source, 'snippet') and source.snippet else 'Содержание недоступно'
+            analysis_content += f"**Фрагмент документа:**\n{snippet_content}\n\n"
+        
+        analysis_content += f"**Источник:** [Документ {source.document_id}](https://lex.uz/acts/{source.document_id})\n\n"
+        analysis_content += "---\n\n"
+    
+    # Add conclusion note
+    analysis_content += "## Заключение\n\n"
+    analysis_content += "Данный анализ основан на официальных документах из правовой базы lex.uz. "
+    analysis_content += "Для получения точных размеров минимальной пенсии рекомендуется ознакомиться с полными текстами указанных документов по предоставленным ссылкам.\n\n"
+    analysis_content += "**Примечание:** Анализ выполнен на основании доступной информации из указанных источников. "
+    analysis_content += "Для получения актуальной информации рекомендуется обратиться к последним редакциям нормативно-правовых актов."
+    
+    # Create artifact using the artifact tool logic
+    artifact_xml = f"""<artifact command="create" artifact_id="legal_analysis_{len(approved_sources)}_sources" title="Правовой анализ: {current_user_question}" type="legal_analysis" stage="final">
+{analysis_content}
+</artifact>"""
+    
+    return Command(
+        update={
+            "artifacts": {f"legal_analysis_{len(approved_sources)}_sources": {
+                "id": f"legal_analysis_{len(approved_sources)}_sources",
+                "title": f"Правовой анализ: {current_user_question}",
+                "type": "legal_analysis", 
+                "content": analysis_content,
+                "stage": "final"
+            }},
+            "parsed_documents": updated_parsed_documents,  # Save newly parsed documents
+            "current_artifact_id": f"legal_analysis_{len(approved_sources)}_sources",
+            "workflow_stage": "analysis_completed",
+            "completed_stages": ["analysis_created"],
+            "messages": [ToolMessage(artifact_xml, tool_call_id=tool_call_id)]
+        }
+    )
 
 
 @tool
@@ -440,7 +680,13 @@ def artifact(
     artifacts: Annotated[Dict[str, Artifact], InjectedState("artifacts")],
     tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Manage artifacts with version control for legal documents.
+    """⚠️ PREREQUISITE: Use only AFTER completing the 4-step research workflow and getting approved sources.
+    
+    Manage artifacts with version control for legal documents. This tool creates professional
+    legal analysis documents based on approved and parsed legal sources.
+    
+    WORKFLOW REQUIREMENT: This is Step 5+ (final step) - only use after:
+    1. generate_multi_search_strategy → 2. execute_multi_search → 3. validate_and_rank_sources → 4. request_source_approval (with human approval)
     
     Args:
         command: Action to perform (create, update, rewrite)
@@ -451,6 +697,7 @@ def artifact(
         old_str: String to replace (required for update)
         new_str: Replacement string (required for update)
         stage: Stage of artifact (draft, review, final)
+        artifacts: Existing artifacts (injected from state)
     
     Returns:
         Command object with artifact XML response

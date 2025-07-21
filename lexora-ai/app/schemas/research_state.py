@@ -19,6 +19,9 @@ class ValidationResult(BaseModel):
     """Validation result for a specific document"""
     document_id: str
     title: str
+    snippet: str
+    url: str
+    document_date: str
     is_relevant: bool
     relevance_score: float
     reasoning: str

@@ -93,11 +93,27 @@ class ResearchAgentWrapper:
         
         try:
             print(f"Invoking graph with state: pending_approval={session['state'].get('pending_approval', False)}")
+            print(f"DEBUG: Pre-invoke validation_results count: {len(session['state'].get('validation_results', []))}")
             result = await self.graph.ainvoke(session["state"], config)
             print(f"Graph result: pending_approval={result.get('pending_approval', False)}, workflow_stage={result.get('workflow_stage', 'unknown')}")
+            print(f"DEBUG: Post-invoke validation_results count: {len(result.get('validation_results', []))}")
             
-            # Update session state
+            # Preserve critical state that might be lost during graph execution
+            preserved_state = {
+                "validation_results": session["state"].get("validation_results", []),
+                "raw_search_results": session["state"].get("raw_search_results", []),
+                "search_queries_executed": session["state"].get("search_queries_executed", []),
+                "current_user_question": session["state"].get("current_user_question", "")
+            }
+            
+            # Update session state but preserve critical fields if they're missing from result
             session["state"] = result
+            
+            # Restore preserved state if it's missing from the result
+            for key, value in preserved_state.items():
+                if not session["state"].get(key) and value:
+                    session["state"][key] = value
+                    print(f"DEBUG: Restored {key} with {len(value) if isinstance(value, list) else type(value)} items/value")
             
             # Extract assistant messages and check for interrupts
             new_assistant_messages = []
@@ -105,6 +121,7 @@ class ResearchAgentWrapper:
             
             for msg in result["messages"]:
                 if hasattr(msg, 'content') and msg.content and msg.content.strip():
+                    # Handle AI messages (regular responses)
                     if isinstance(msg, AIMessage) or (hasattr(msg, 'type') and msg.type == "ai"):
                         try:
                             clean_content = msg.content.strip()
@@ -115,7 +132,23 @@ class ResearchAgentWrapper:
                                     new_assistant_messages.append(message_obj)
                                     session_history.append(message_obj)
                         except Exception as e:
-                            print(f"Skipping message due to validation error: {e}")
+                            print(f"Skipping AI message due to validation error: {e}")
+                            continue
+                    
+                    # Handle tool messages that contain artifacts (from create_legal_analysis_from_approved_sources)
+                    elif ((hasattr(msg, 'type') and msg.type == "tool") or 
+                          (hasattr(msg, '__class__') and 'ToolMessage' in str(msg.__class__))) and "<artifact" in msg.content:
+                        try:
+                            clean_content = msg.content.strip()
+                            if len(clean_content) > 0:
+                                message_obj = Message(role="assistant", content=clean_content)
+                                # Only add if it's not already in session
+                                if message_obj not in session_history:
+                                    new_assistant_messages.append(message_obj)
+                                    session_history.append(message_obj)
+                                    print(f"DEBUG: Added artifact ToolMessage to response: {clean_content[:100]}...")
+                        except Exception as e:
+                            print(f"Skipping ToolMessage due to validation error: {e}")
                             continue
             
             # Check for pending approval (interrupt)
@@ -145,10 +178,11 @@ class ResearchAgentWrapper:
             # Update session
             self._sessions[session_id] = session
             
-            # Prepare response
+            # Prepare response - send ALL new assistant messages (including artifacts)
             response_data = {
-                "messages": new_assistant_messages[-1:] if new_assistant_messages else []
+                "messages": new_assistant_messages if new_assistant_messages else []
             }
+            print(f"DEBUG: Sending {len(new_assistant_messages)} messages to UI")
             
             # Add interrupt data if present
             if interrupt_data:
