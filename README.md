@@ -1,12 +1,12 @@
 # Lexora AI - Legal Research Platform
 
 [![AI Agents](https://img.shields.io/badge/Multi--Agent-LangGraph-green)](https://app.lexora.uz)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Production-blue)](https://api.lexora.uz)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Production-blue)](https://backend.lexora.uz)
 [![Status](https://img.shields.io/badge/Status-Live-success)](https://lexora.uz)
 
 **AI-powered legal research platform for Uzbek law with multi-agent architecture**
 
-🌐 **Live Platform**: [app.lexora.uz](https://app.lexora.uz) | **API**: [api.lexora.uz](https://api.lexora.uz)
+🌐 **Live Platform**: [app.lexora.uz](https://app.lexora.uz) | **API**: [backend.lexora.uz](https://backend.lexora.uz)
 
 ---
 
@@ -287,7 +287,7 @@ lexora-dev/
 
 - **Platform**: [lexora.uz](https://lexora.uz)
 - **Application**: [app.lexora.uz](https://app.lexora.uz)
-- **API**: [api.lexora.uz](https://api.lexora.uz)
+- **API**: [backend.lexora.uz](https://backend.lexora.uz)
 - **Email**: legalai@legalai.uz
 - **Phone**: +998 91 401 25 12
 
