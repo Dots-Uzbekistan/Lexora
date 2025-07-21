@@ -3,6 +3,7 @@
 import { Send as SendIcon, User, Bot } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { sendChatMessage } from "../lib/api";
+import MessageRenderer from "./MessageRenderer";
 
 interface Message {
   role: "user" | "assistant";
@@ -90,7 +91,7 @@ export default function ChatInterface({ sessionId, onBack, initialQuestion }: Ch
         >
           ← Back
         </button>
-        <h1 className="text-xl font-semibold">Legal Q&A Assistant</h1>
+        <h1 className="text-xl font-semibold">Legal Consultation Agent </h1>
       </div>
 
       {/* Messages */}
@@ -122,7 +123,11 @@ export default function ChatInterface({ sessionId, onBack, initialQuestion }: Ch
                   : "bg-neutral-800 text-neutral-100"
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              {message.role === "assistant" ? (
+                <MessageRenderer content={message.content} />
+              ) : (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
             </div>
 
             {message.role === "user" && (

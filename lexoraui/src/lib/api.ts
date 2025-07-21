@@ -1,6 +1,6 @@
 // API configuration and functions for QNA and Research services
 
-const API_BASE_URL = "http://86.105.252.90:2025/api/v1";
+const API_BASE_URL = "https://backend.lexora.uz/api/v1";
 
 export interface Message {
   role: "user" | "assistant";
