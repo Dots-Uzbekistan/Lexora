@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import { sendResearchMessage } from "../lib/api";
 import SourceApproval from "./SourceApproval";
 import ArtifactRenderer from "./ArtifactRenderer";
+import MessageRenderer from "./MessageRenderer";
 
 interface Message {
   role: "user" | "assistant";
@@ -144,7 +145,7 @@ export default function ResearchInterface({ sessionId, onBack, initialQuestion }
           ← Back
         </button>
         <Search className="w-5 h-5 text-blue-500" />
-        <h1 className="text-xl font-semibold">Legal Research Assistant</h1>
+        <h1 className="text-xl font-semibold">Legal Research Agent</h1>
       </div>
 
       {/* Messages */}
@@ -180,6 +181,8 @@ export default function ResearchInterface({ sessionId, onBack, initialQuestion }
               {/* Check for artifacts in assistant messages */}
               {message.role === "assistant" && message.content.includes("<artifact") ? (
                 <ArtifactRenderer content={message.content} />
+              ) : message.role === "assistant" ? (
+                <MessageRenderer content={message.content} />
               ) : (
                 <p className="whitespace-pre-wrap">{message.content}</p>
               )}

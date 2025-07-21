@@ -126,7 +126,7 @@ export default function Home() {
             <button
               key={tool.label}
               disabled={tool.comingSoon}
-              onClick={tool.label === "Smart Conclusion Engine" ? handleResearchToolClick : undefined}
+              onClick={(tool.label === "Smart Conclusion Engine" || tool.label === "Case to Action Plan") ? handleResearchToolClick : undefined}
               className={`relative aspect-square rounded-lg p-4 text-left flex flex-col justify-end overflow-hidden ${
                 tool.gradient
               } ${tool.comingSoon && "opacity-60 cursor-not-allowed"}`}
